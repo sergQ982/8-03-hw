@@ -1,72 +1,145 @@
-# Домашнее задание к занятию "Git" - Сенин Сергей 
+10.4 Отказоустойчивость в облаке
+Задание 1
+Возьмите за основу решение задания 1 из занятия «Создание инфраструктуры в Яндекс Облаке».
 
+Теперь вместо одной виртуальной машины создайте плейбук terraform, который:
+создаст 2 идентичные виртуальные машины. Используйте аргумент count для создания таких ресурсов;
+создаст таргет-группу. Поместите в нее виртуальные машины, созданные на шаге 1;
+создаст сетевой балансировщик нагрузки, который прослушивает порт 80, отправляет трафик на порт 80 виртуальных машин и выполняет http-проверку работоспособности на порту 80 виртуальных машин.
+Рекомендуем изучить документацию по сетевому балансировщику нагрузки, чтобы понять, что вы сделали.
 
-### Инструкция по выполнению домашнего задания
+Установите на созданные виртуальные машины пакет Nginx любым удобным способом и запустите веб-сервер Nginx на порту 80.
 
-   1. Сделайте `fork` данного репозитория к себе в Github и переименуйте его по названию или номеру занятия, например, https://github.com/имя-вашего-репозитория/git-hw или  https://github.com/имя-вашего-репозитория/7-1-ansible-hw).
-   2. Выполните клонирование данного репозитория к себе на ПК с помощью команды `git clone`.
-   3. Выполните домашнее задание и заполните у себя локально этот файл README.md:
-      - впишите вверху название занятия и вашу фамилию и имя
-      - в каждом задании добавьте решение в требуемом виде (текст/код/скриншоты/ссылка)
-      - для корректного добавления скриншотов воспользуйтесь [инструкцией "Как вставить скриншот в шаблон с решением](https://github.com/netology-code/sys-pattern-homework/blob/main/screen-instruction.md)
-      - при оформлении используйте возможности языка разметки md (коротко об этом можно посмотреть в [инструкции  по MarkDown](https://github.com/netology-code/sys-pattern-homework/blob/main/md-instruction.md))
-   4. После завершения работы над домашним заданием сделайте коммит (`git commit -m "comment"`) и отправьте его на Github (`git push origin`);
-   5. В личном кабинете прикрепите и отправьте ссылку на решение в виде md-файла в вашем Github.
-   6. Любые вопросы по выполнению заданий спрашивайте в разделе “Вопросы по заданию” в личном кабинете.
-   
-Желаем успехов в выполнении домашнего задания!
-   
-### Дополнительные материалы, которые могут быть полезны для выполнения задания
+Перейдите в веб-консоль Yandex Cloud и убедитесь, что:
 
-1. [Руководство по оформлению Markdown файлов](https://gist.github.com/Jekins/2bf2d0638163f1294637#Code)
+созданный балансировщик находится в статусе Active,
+обе виртуальные машины в целевой группе находятся в состоянии healthy.
+Отправьте запрос на порт 80 на внешний IP-адрес балансировщика и убедитесь, что получаете ответ в виде страницы Nginx по умолчанию.
+В качестве результата пришлите:
 
----
+1. data "yandex_compute_image" "debian" {
+  family = "debian-11"
+}
 
-### Задание 1
+resource "yandex_vpc_network" "web" {
+  name = "${var.project_name}-network"
+}
 
-1. Зарегистрируйте аккаунт на GitHub.
-2. Создайте новый отдельный публичный репозиторий. Обязательно поставьте галочку в поле «Initialize this repository with a README».
-3. Склонируйте репозиторий, используя https протокол git clone ....
-4. Перейдите в каталог с клоном репозитория.
-5. Произведите первоначальную настройку Git, указав своё настоящее имя и email: git config --global user.name и git config --global user.email johndoe@example.com.
-6. Выполните команду git status и запомните результат.
-7. Отредактируйте файл README.md любым удобным способом, переведя файл в состояние Modified.
-8. Ещё раз выполните git status и продолжайте проверять вывод этой команды после каждого следующего шага.
-9. Посмотрите изменения в файле README.md, выполнив команды git diff и git diff --staged.
-10. Переведите файл в состояние staged или, как говорят, добавьте файл в коммит, командой git add README.md.
-11. Ещё раз выполните команды git diff и git diff --staged.
-12. Теперь можно сделать коммит git commit -m 'First commit'.
-13. Сделайте git push origin master.
-В качестве ответа добавьте ссылку на этот коммит в ваш md-файл с решением.
+resource "yandex_vpc_subnet" "web" {
+  name           = "${var.project_name}-subnet"
+  zone           = var.zone
+  network_id     = yandex_vpc_network.web.id
+  v4_cidr_blocks = ["10.10.0.0/24"]
+}
 
-https://github.com/sergQ982/git-homework/commit/f19e34ae70a5474f4b8e7cf916481d2f3a91073b
----
+resource "yandex_vpc_security_group" "web" {
+  name        = "${var.project_name}-sg"
+  network_id  = yandex_vpc_network.web.id
+  description = "Allow SSH, HTTP and outbound traffic for homework web VMs"
 
-### Задание 2
+  ingress {
+    protocol       = "TCP"
+    description    = "HTTP from internet"
+    v4_cidr_blocks = ["0.0.0.0/0"]
+    port           = 80
+  }
 
-1. Создайте файл .gitignore (обратите внимание на точку в начале файла) и проверьте его статус сразу после создания.
-2. Добавьте файл .gitignore в следующий коммит git add....
-3. Напишите правила в этом файле, чтобы игнорировать любые файлы .pyc, а также все файлы в директории cache.
-4. Сделайте коммит и пуш.
-В качестве ответа добавьте ссылку на этот коммит в ваш md-файл с решением.
+  ingress {
+    protocol          = "TCP"
+    description       = "Health checks from network load balancer"
+    predefined_target = "loadbalancer_healthchecks"
+    port              = 80
+  }
 
-https://github.com/sergQ982/git-homework/blob/main/.gitignore
+  ingress {
+    protocol       = "TCP"
+    description    = "SSH administration"
+    v4_cidr_blocks = ["0.0.0.0/0"]
+    port           = 22
+  }
+}
 
----
+resource "yandex_compute_instance" "web" {
+  count = 2
 
-### Задание 3
+  name        = "${var.project_name}-web-${count.index + 1}"
+  platform_id = "standard-v3"
+  zone        = var.zone
 
-1. Создайте новую ветку dev и переключитесь на неё.
-2. Создайте в ветке dev файл test.sh с произвольным содержимым.
-3. Сделайте несколько коммитов и пушей в ветку dev, имитируя активную работу над файлом в процессе разработки.
-4. Переключитесь на основную ветку.
-5. Добавьте файл main.sh в основной ветке с произвольным содержимым, сделайте комит и пуш . Так имитируется продолжение общекомандной разработки в основной ветке во время разработки отдельного функционала в dev ветке.
-6. Сделайте мердж dev ветки в основную с помощью git merge dev. Напишите осмысленное сообщение в появившееся окно комита.
-7. Сделайте пуш в основной ветке.
-8. Не удаляйте ветку dev.
-В качестве ответа прикрепите ссылку на граф коммитов https://github.com/ваш-логин/ваш-репозиторий/network в ваш md-файл с решением.
+  resources {
+    cores  = var.vm_cores
+    memory = var.vm_memory
+  }
 
-Ваш граф комитов должен выглядеть аналогично скриншоту:
+  boot_disk {
+    initialize_params {
+      image_id = data.yandex_compute_image.debian.id
+      size     = 10
+      type     = "network-ssd"
+    }
+  }
 
-https://github.com/sergQ982/git-homework/network
+  network_interface {
+    subnet_id          = yandex_vpc_subnet.web.id
+    nat                = true
+    security_group_ids = [yandex_vpc_security_group.web.id]
+  }
 
+  metadata = {
+    ssh-keys  = "debian:${trimspace(file(pathexpand(var.ssh_public_key_path)))}"
+    user-data = file("${path.module}/cloud-init.yaml")
+  }
+
+  depends_on = [yandex_vpc_subnet.web]
+}
+
+resource "yandex_lb_target_group" "web" {
+  name = "${var.project_name}-target-group"
+
+  dynamic "target" {
+    for_each = yandex_compute_instance.web
+    content {
+      subnet_id = yandex_vpc_subnet.web.id
+      address   = target.value.network_interface[0].ip_address
+    }
+  }
+}
+
+resource "yandex_lb_network_load_balancer" "web" {
+  name = "${var.project_name}-nlb"
+  type = "external"
+
+  listener {
+    name        = "http-listener"
+    port        = 80
+    target_port = 80
+    protocol    = "tcp"
+
+    external_address_spec {
+      ip_version = "ipv4"
+    }
+  }
+
+  attached_target_group {
+    target_group_id = yandex_lb_target_group.web.id
+
+    healthcheck {
+      name                = "nginx-http-healthcheck"
+      interval            = 5
+      timeout             = 2
+      healthy_threshold   = 2
+      unhealthy_threshold = 3
+
+      http_options {
+        port = 80
+        path = "/"
+      }
+    }
+  }
+}
+
+2. Скриншот статуса балансировщика и целевой группы.
+png
+
+3. Скриншот страницы, которая открылась при запросе IP-адреса балансировщика.
+png png
