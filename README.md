@@ -24,124 +24,138 @@
 *В качестве результата пришлите:*
 
 ### *1. Terraform Playbook.*
-#### Terraform: [main.tf](https://github.com/tverdyakov/portfolio-tverdyakov/blob/main/Experience%2C%20skills%20and%20abilities/Netology/10.%20Отказоустойчивость/04.%20Отказоустойчивость%20в%20облаке/screenshots-and-files/main.tf)
+#### Terraform: 
 ```bash
-terraform {
-  required_providers {
-    yandex = {
-      source = "yandex-cloud/yandex"
-    }
+data "yandex_compute_image" "debian" {
+  family = "debian-11"
+}
+
+resource "yandex_vpc_network" "web" {
+  name = "${var.project_name}-network"
+}
+
+resource "yandex_vpc_subnet" "web" {
+  name           = "${var.project_name}-subnet"
+  zone           = var.zone
+  network_id     = yandex_vpc_network.web.id
+  v4_cidr_blocks = ["10.10.0.0/24"]
+}
+
+resource "yandex_vpc_security_group" "web" {
+  name        = "${var.project_name}-sg"
+  network_id  = yandex_vpc_network.web.id
+  description = "Allow SSH, HTTP and outbound traffic for homework web VMs"
+
+  ingress {
+    protocol       = "TCP"
+    description    = "HTTP from internet"
+    v4_cidr_blocks = ["0.0.0.0/0"]
+    port           = 80
+  }
+
+  ingress {
+    protocol          = "TCP"
+    description       = "Health checks from network load balancer"
+    predefined_target = "loadbalancer_healthchecks"
+    port              = 80
+  }
+
+  ingress {
+    protocol       = "TCP"
+    description    = "SSH administration"
+    v4_cidr_blocks = ["0.0.0.0/0"]
+    port           = 22
   }
 }
 
-provider "yandex" {
-  token     = XXX
-  cloud_id  = XXX
-  folder_id = XXX
-  zone      = "ru-central1-b"
-}
+resource "yandex_compute_instance" "web" {
+  count = 2
 
-resource "yandex_compute_instance" "vm" {
-  count           = 2
-  name            = "vm${count.index}"
-  platform_id     = "standard-v1"
+  name        = "${var.project_name}-web-${count.index + 1}"
+  platform_id = "standard-v3"
+  zone        = var.zone
 
   resources {
-    cores         = 2
-    core_fraction = 5
-    memory        = 1
+    cores  = var.vm_cores
+    memory = var.vm_memory
   }
 
   boot_disk {
     initialize_params {
-      image_id = "fd8gqjo661d83tv5dnv4"
-      size     = 5
+      image_id = data.yandex_compute_image.debian.id
+      size     = 10
+      type     = "network-ssd"
     }
   }
-  
+
   network_interface {
-    subnet_id = yandex_vpc_subnet.subnet-1.id
-    nat       = true
+    subnet_id          = yandex_vpc_subnet.web.id
+    nat                = true
+    security_group_ids = [yandex_vpc_security_group.web.id]
   }
 
   metadata = {
-    user-data = "${file("./meta.yml")}"
+    ssh-keys  = "debian:${trimspace(file(pathexpand(var.ssh_public_key_path)))}"
+    user-data = file("${path.module}/cloud-init.yaml")
   }
 
-  scheduling_policy {
-    preemptible = true
-  }
+  depends_on = [yandex_vpc_subnet.web]
 }
 
-resource "yandex_vpc_network" "network-1" {
-  name = "network1"
-}
+resource "yandex_lb_target_group" "web" {
+  name = "${var.project_name}-target-group"
 
-resource "yandex_vpc_subnet" "subnet-1" {
-  name           = "subnet1"
-  zone           = "ru-central1-b"
-  v4_cidr_blocks = ["192.168.10.0/24"]
-  network_id     = "${yandex_vpc_network.network-1.id}"
-}
-
-resource "yandex_lb_target_group" "tg-1" {
-  name        = "tg-1"
-
-  target {
-    subnet_id = yandex_vpc_subnet.subnet-1.id
-    address   = yandex_compute_instance.vm[0].network_interface.0.ip_address
-  }
-  target {
-    subnet_id = yandex_vpc_subnet.subnet-1.id
-    address   = yandex_compute_instance.vm[1].network_interface.0.ip_address
+  dynamic "target" {
+    for_each = yandex_compute_instance.web
+    content {
+      subnet_id = yandex_vpc_subnet.web.id
+      address   = target.value.network_interface[0].ip_address
+    }
   }
 }
 
-resource "yandex_lb_network_load_balancer" "lb-1" {
-  name = "lb-1"
-  deletion_protection = "false"
+resource "yandex_lb_network_load_balancer" "web" {
+  name = "${var.project_name}-nlb"
+  type = "external"
+
   listener {
-    name = "listener-lb1"
-    port = 80
+    name        = "http-listener"
+    port        = 80
+    target_port = 80
+    protocol    = "tcp"
+
     external_address_spec {
       ip_version = "ipv4"
     }
   }
 
   attached_target_group {
-    target_group_id = yandex_lb_target_group.tg-1.id
+    target_group_id = yandex_lb_target_group.web.id
+
     healthcheck {
-      name = "http"
-        http_options {
-          port = 80
-          path = "/"
+      name                = "nginx-http-healthcheck"
+      interval            = 5
+      timeout             = 2
+      healthy_threshold   = 2
+      unhealthy_threshold = 3
+
+      http_options {
+        port = 80
+        path = "/"
       }
     }
   }
 }
 
-output "internal_ip_address_vm_0" {
-  value = yandex_compute_instance.vm[0].network_interface.0.ip_address
-}
-
-output "external_ip_address_vm_0" {
-  value = yandex_compute_instance.vm[0].network_interface.0.nat_ip_address
-}
-
-output "internal_ip_address_vm_1" {
-  value = yandex_compute_instance.vm[1].network_interface.0.ip_address
-}
-
-output "external_ip_address_vm_1" {
-  value = yandex_compute_instance.vm[1].network_interface.0.nat_ip_address
-}
 ```
 ### *2. Скриншот статуса балансировщика и целевой группы.*
-![png](https://github.com/tverdyakov/portfolio-tverdyakov/blob/main/Experience%2C%20skills%20and%20abilities/Netology/10.%20Отказоустойчивость/04.%20Отказоустойчивость%20в%20облаке/screenshots-and-files/Задание%201.2.png)
+<img width="1280" height="890" alt="image" src="https://github.com/user-attachments/assets/579c3de0-a712-47a5-9c7c-0f12d8ab347a" />
+
 
 ### *3. Скриншот страницы, которая открылась при запросе IP-адреса балансировщика.*
+<img width="1280" height="309" alt="image" src="https://github.com/user-attachments/assets/ce05459d-c76f-46bf-826a-8d613c61bc00" />
+<img width="1280" height="435" alt="image" src="https://github.com/user-attachments/assets/3d092e5d-bfd4-45ee-a73c-bc11fd69614d" />
 
-![png](https://github.com/tverdyakov/portfolio-tverdyakov/blob/main/Experience%2C%20skills%20and%20abilities/Netology/10.%20Отказоустойчивость/04.%20Отказоустойчивость%20в%20облаке/screenshots-and-files/Задание%201.3.0.png)
-![png](https://github.com/tverdyakov/portfolio-tverdyakov/blob/main/Experience%2C%20skills%20and%20abilities/Netology/10.%20Отказоустойчивость/04.%20Отказоустойчивость%20в%20облаке/screenshots-and-files/Задание%201.3.1.png)
+
 
 ---
